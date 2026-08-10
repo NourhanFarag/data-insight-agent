@@ -37,12 +37,13 @@ CORRELATION
 - second_column required
 - group_by forbidden
 
-Additional Instructions:
-- Choose the minimum number of steps needed to answer the question.
-- Do not add unrelated exploratory operations.
-- Never populate optional fields unless the selected operation needs them.
-- If the question asks for average values by category, prefer GROUP_BY_MEAN.
-- TOP_VALUES is for frequency/ranking of categorical values, not grouped numerical aggregation.
+- UNSUPPORTED-QUESTION RESTRAINT RULE: You must first evaluate whether the columns and metadata in the DatasetSummary can materially support or answer the user's question. If the user asks about a concept, cause, reason, or relationship that is not represented in the available columns:
+  - Do NOT invent proxy metrics or select unrelated columns.
+  - Do NOT perform exploratory GROUP_BY_MEAN, CORRELATION, or other operations on unrelated fields to force an answer.
+  - Instead, generate a minimal fallback plan containing exactly one step:
+    * Operation: COUNT
+    * Column: Omit/leave empty
+    * Reason: Explain that the available columns do not contain the data needed to address the requested concept.
 
 4. Use ONLY columns that are explicitly listed in the provided DatasetSummary. Do not invent columns.
 5. Do NOT write Python code, SQL queries, shell commands, or any executable expressions.
@@ -91,12 +92,13 @@ CORRELATION
 - second_column required
 - group_by forbidden
 
-Additional Instructions:
-- Choose the minimum number of steps needed to answer the question.
-- Do not add unrelated exploratory operations.
-- Never populate optional fields unless the selected operation needs them.
-- If the question asks for average values by category, prefer GROUP_BY_MEAN.
-- TOP_VALUES is for frequency/ranking of categorical values, not grouped numerical aggregation.
+- UNSUPPORTED-QUESTION RESTRAINT RULE: You must first evaluate whether the columns and metadata in the DatasetSummary can materially support or answer the user's question. If the user asks about a concept, cause, reason, or relationship that is not represented in the available columns:
+  - Do NOT invent proxy metrics or select unrelated columns.
+  - Do NOT perform exploratory GROUP_BY_MEAN, CORRELATION, or other operations on unrelated fields to force an answer.
+  - Instead, generate a minimal fallback plan containing exactly one step:
+    * Operation: COUNT
+    * Column: Omit/leave empty
+    * Reason: Explain that the available columns do not contain the data needed to address the requested concept.
 
 4. Use ONLY columns that are explicitly listed in the provided DatasetSummary. Do not invent columns.
 5. Do NOT write Python code, SQL queries, shell commands, or any executable expressions.
