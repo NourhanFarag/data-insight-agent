@@ -1,0 +1,24 @@
+{
+  "case_id": "multistep_business",
+  "dataset_path": "evaluation/datasets/sales_basic.csv",
+  "question": "Which customer segment has the highest average revenue, and what should we prioritize?",
+  "required_operations": ["GROUP_BY_MEAN"],
+  "acceptable_operations": ["GROUP_BY_COUNT", "COUNT"],
+  "prohibited_operations": ["CORRELATION"],
+  "expected_result_checks": [
+    {
+      "operation": "GROUP_BY_MEAN",
+      "column": "revenue",
+      "group_by": "segment",
+      "expected_value": {
+        "Enterprise": 500.0,
+        "SMB": 200.0
+      },
+      "tolerance": 0.0001
+    }
+  ],
+  "required_finding_concepts": ["Enterprise", "500", "SMB", "200"],
+  "prohibited_claims": [],
+  "acceptable_recommendation_themes": ["allocate resource", "prioritize"],
+  "tags": ["multistep", "business"]
+}

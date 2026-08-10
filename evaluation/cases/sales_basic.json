@@ -1,0 +1,24 @@
+{
+  "case_id": "sales_basic",
+  "dataset_path": "evaluation/datasets/sales_basic.csv",
+  "question": "Which department performs best by average revenue?",
+  "required_operations": ["GROUP_BY_MEAN"],
+  "acceptable_operations": ["COUNT"],
+  "prohibited_operations": [],
+  "expected_result_checks": [
+    {
+      "operation": "GROUP_BY_MEAN",
+      "column": "revenue",
+      "group_by": "department",
+      "expected_value": {
+        "Engineering": 500.0,
+        "Sales": 200.0
+      },
+      "tolerance": 0.0001
+    }
+  ],
+  "required_finding_concepts": ["Engineering", "500", "Sales", "200"],
+  "prohibited_claims": [],
+  "acceptable_recommendation_themes": ["allocate resource", "prioritize"],
+  "tags": ["grouped", "basic"]
+}

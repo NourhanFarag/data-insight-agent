@@ -1,0 +1,21 @@
+{
+  "case_id": "weak_correlation",
+  "dataset_path": "evaluation/datasets/weak_correlation.csv",
+  "question": "Is there an association between height and customer rating?",
+  "required_operations": ["CORRELATION"],
+  "acceptable_operations": ["MEAN"],
+  "prohibited_operations": [],
+  "expected_result_checks": [
+    {
+      "operation": "CORRELATION",
+      "column": "height",
+      "second_column": "rating",
+      "expected_value": 0.0,
+      "tolerance": 0.0001
+    }
+  ],
+  "required_finding_concepts": ["no correlation", "weak", "0.0"],
+  "prohibited_claims": ["strong association", "drives", "causes"],
+  "acceptable_recommendation_themes": ["no action needed", "ignore height"],
+  "tags": ["correlation", "weak_correlation", "descriptive"]
+}

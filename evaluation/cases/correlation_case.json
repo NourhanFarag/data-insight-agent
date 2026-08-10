@@ -1,0 +1,21 @@
+{
+  "case_id": "correlation_case",
+  "dataset_path": "evaluation/datasets/correlation_case.csv",
+  "question": "Is customer age associated with spending?",
+  "required_operations": ["CORRELATION"],
+  "acceptable_operations": ["MEAN"],
+  "prohibited_operations": [],
+  "expected_result_checks": [
+    {
+      "operation": "CORRELATION",
+      "column": "age",
+      "second_column": "spending",
+      "expected_value": 1.0,
+      "tolerance": 0.0001
+    }
+  ],
+  "required_finding_concepts": ["correlation", "1.0", "associated"],
+  "prohibited_claims": ["cause", "leads to", "drives", "results in", "because of"],
+  "acceptable_recommendation_themes": ["further study", "segment by age"],
+  "tags": ["correlation", "descriptive"]
+}

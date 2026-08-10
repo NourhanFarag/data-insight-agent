@@ -1,0 +1,20 @@
+{
+  "case_id": "irrelevant_columns",
+  "dataset_path": "evaluation/datasets/irrelevant_columns.csv",
+  "question": "What is the average transaction value?",
+  "required_operations": ["MEAN"],
+  "acceptable_operations": ["COUNT"],
+  "prohibited_operations": ["CORRELATION", "GROUP_BY_MEAN", "GROUP_BY_COUNT", "TOP_VALUES"],
+  "expected_result_checks": [
+    {
+      "operation": "MEAN",
+      "column": "transaction_value",
+      "expected_value": 250.0,
+      "tolerance": 0.0001
+    }
+  ],
+  "required_finding_concepts": ["250"],
+  "prohibited_claims": [],
+  "acceptable_recommendation_themes": ["baseline transaction"],
+  "tags": ["efficiency", "summary"]
+}

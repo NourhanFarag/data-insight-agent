@@ -1,0 +1,5 @@
+transaction_value,customer_id,device_type,ip_address,session_duration,redundant_col_1,redundant_col_2
+100,10,Mobile,127.0.0.1,60,A,X
+200,11,Desktop,127.0.0.2,120,B,Y
+300,12,Desktop,127.0.0.3,180,C,Z
+400,13,Mobile,127.0.0.4,240,D,W

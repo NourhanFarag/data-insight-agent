@@ -1,0 +1,18 @@
+{
+  "case_id": "unsupported_question",
+  "dataset_path": "evaluation/datasets/sales_basic.csv",
+  "question": "Why did customers become dissatisfied with support agents?",
+  "required_operations": ["COUNT"],
+  "acceptable_operations": [],
+  "prohibited_operations": ["MEAN", "SUM", "MEDIAN", "CORRELATION"],
+  "expected_result_checks": [
+    {
+      "operation": "COUNT",
+      "expected_value": 4
+    }
+  ],
+  "required_finding_concepts": [],
+  "prohibited_claims": ["support agent", "dissatisfied", "agent behavior"],
+  "acceptable_recommendation_themes": ["collect customer feedback", "survey"],
+  "tags": ["unsupported", "limitation"]
+}

@@ -1,0 +1,20 @@
+{
+  "case_id": "overall_summary",
+  "dataset_path": "evaluation/datasets/sales_basic.csv",
+  "question": "What is the average revenue?",
+  "required_operations": ["MEAN"],
+  "acceptable_operations": ["COUNT"],
+  "prohibited_operations": ["CORRELATION", "GROUP_BY_MEAN", "GROUP_BY_COUNT"],
+  "expected_result_checks": [
+    {
+      "operation": "MEAN",
+      "column": "revenue",
+      "expected_value": 350.0,
+      "tolerance": 0.0001
+    }
+  ],
+  "required_finding_concepts": ["350"],
+  "prohibited_claims": [],
+  "acceptable_recommendation_themes": ["baseline", "average"],
+  "tags": ["numeric", "summary"]
+}
