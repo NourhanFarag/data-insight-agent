@@ -5,7 +5,7 @@ from app.providers.base import BaseProvider
 from app.models.responses import DatasetSummary
 from app.models.analysis import AnalysisPlan, ProviderReport, AnalysisResult
 from app.core.exceptions import ProviderError
-from app.prompts.planner import PLANNER_SYSTEM_PROMPT, format_planner_user_prompt
+from app.prompts.planner import PLANNER_SYSTEM_PROMPT, format_planner_user_prompt, REPAIR_SYSTEM_PROMPT, format_repair_user_prompt
 from app.prompts.reporter import REPORTER_SYSTEM_PROMPT, format_reporter_user_prompt
 
 class OpenAIProvider(BaseProvider):
@@ -40,6 +40,44 @@ class OpenAIProvider(BaseProvider):
             if settings.OPENAI_API_KEY in error_msg:
                 error_msg = error_msg.replace(settings.OPENAI_API_KEY, "OPENAI_API_KEY")
             raise ProviderError(f"OpenAI planner request failed: {error_msg}")
+
+    async def repair_analysis_plan(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        invalid_plan: AnalysisPlan,
+        validation_feedback: str,
+    ) -> AnalysisPlan:
+        """Invokes OpenAI completions API with Responses API structured parsing to repair an AnalysisPlan."""
+        client = self._get_client()
+        sys_prompt = REPAIR_SYSTEM_PROMPT.format(max_steps=settings.MAX_ANALYSIS_STEPS)
+        user_prompt = format_repair_user_prompt(
+            question,
+            dataset_summary.model_dump_json(indent=2),
+            invalid_plan.model_dump_json(indent=2),
+            validation_feedback
+        )
+
+        try:
+            response = client.responses.parse(
+                model=settings.OPENAI_MODEL,
+                input=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                text_format=AnalysisPlan
+            )
+
+            parsed_plan = getattr(response, "output_parsed", None)
+            if not parsed_plan:
+                raise ProviderError("OpenAI provider returned empty parsed response during repair (refused or empty).")
+            return parsed_plan
+
+        except Exception as e:
+            error_msg = str(e)
+            if settings.OPENAI_API_KEY in error_msg:
+                error_msg = error_msg.replace(settings.OPENAI_API_KEY, "OPENAI_API_KEY")
+            raise ProviderError(f"OpenAI planner repair request failed: {error_msg}")
 
     async def generate_report(
         self, question: str, summary: DatasetSummary, results: list[AnalysisResult]

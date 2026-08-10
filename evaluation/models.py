@@ -30,6 +30,8 @@ class PlannerScores(BaseModel):
     irrelevant_operation_rate: float
     invalid_column_attempts: int
     planner_success: bool
+    plan_repair_attempted: bool = False
+    plan_repair_succeeded: bool = False
 
 class GroundingScores(BaseModel):
     structurally_grounded: bool

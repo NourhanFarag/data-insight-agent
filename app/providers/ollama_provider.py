@@ -6,7 +6,7 @@ from app.providers.base import BaseProvider
 from app.models.responses import DatasetSummary
 from app.models.analysis import AnalysisPlan, ProviderReport, AnalysisResult
 from app.core.exceptions import ProviderError
-from app.prompts.planner import PLANNER_SYSTEM_PROMPT, format_planner_user_prompt
+from app.prompts.planner import PLANNER_SYSTEM_PROMPT, format_planner_user_prompt, REPAIR_SYSTEM_PROMPT, format_repair_user_prompt
 from app.prompts.reporter import REPORTER_SYSTEM_PROMPT, format_reporter_user_prompt
 from app.providers.ollama_schemas import OllamaAnalysisPlan, OllamaProviderReport
 
@@ -70,6 +70,70 @@ class OllamaProvider(BaseProvider):
                     "Ollama is not available at the configured local URL. Start Ollama and ensure the configured model is installed."
                 )
             raise ProviderError(f"Ollama planner request failed: {error_msg}")
+
+    async def repair_analysis_plan(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        invalid_plan: AnalysisPlan,
+        validation_feedback: str,
+    ) -> AnalysisPlan:
+        """Invokes local Ollama model to repair an invalid AnalysisPlan."""
+        sys_prompt = REPAIR_SYSTEM_PROMPT.format(max_steps=settings.MAX_ANALYSIS_STEPS)
+        user_prompt = format_repair_user_prompt(
+            question,
+            dataset_summary.model_dump_json(indent=2),
+            invalid_plan.model_dump_json(indent=2),
+            validation_feedback
+        )
+
+        try:
+            client = self._get_client()
+            response = client.chat(
+                model=settings.OLLAMA_MODEL,
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                format=OllamaAnalysisPlan.model_json_schema(),
+                options={
+                    "temperature": settings.OLLAMA_TEMPERATURE
+                }
+            )
+
+            content = getattr(response.message, "content", None)
+            if not content or not content.strip():
+                raise ProviderError("Ollama returned no structured output during repair.")
+
+            try:
+                raw_plan = OllamaAnalysisPlan.model_validate_json(content)
+            except Exception as e:
+                raise ProviderError(f"Ollama repaired plan parsing failed: {e}")
+
+            try:
+                plan = AnalysisPlan.model_validate(raw_plan.model_dump())
+                return plan
+            except Exception as e:
+                raise ProviderError(f"Ollama repaired plan schema validation failed: {e}")
+
+        except ConnectionError as ce:
+            raise ProviderError(
+                "Ollama is not available at the configured local URL. Start Ollama and ensure the configured model is installed."
+            )
+        except ResponseError as re:
+            logger.error("Ollama ResponseError during repair: status_code=%s, error=%s", re.status_code, re.error)
+            if re.status_code == 400 or "grammar" in str(re).lower() or "sampler" in str(re).lower():
+                raise ProviderError(
+                    "Ollama request failed: Schema grammar compatibility issue or invalid request."
+                )
+            raise ProviderError(f"Ollama plan repair request failed: {re}")
+        except Exception as e:
+            error_msg = str(e)
+            if "connect" in error_msg.lower() or "connection" in error_msg.lower():
+                raise ProviderError(
+                    "Ollama is not available at the configured local URL. Start Ollama and ensure the configured model is installed."
+                )
+            raise ProviderError(f"Ollama plan repair request failed: {error_msg}")
 
     async def generate_report(
         self, question: str, summary: DatasetSummary, results: list[AnalysisResult]

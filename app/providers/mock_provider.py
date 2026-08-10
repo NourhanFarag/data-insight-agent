@@ -69,6 +69,28 @@ class MockProvider(BaseProvider):
             steps=steps
         )
 
+    async def repair_analysis_plan(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        invalid_plan: AnalysisPlan,
+        validation_feedback: str,
+    ) -> AnalysisPlan:
+        """Deterministically repairs an invalid AnalysisPlan."""
+        if "fail_repair" in question.lower() or "fail_repair" in validation_feedback.lower():
+            return AnalysisPlan(
+                objective="Fail repair intentionally",
+                steps=[
+                    AnalysisStep(
+                        step_id="step_1",
+                        operation=AnalysisOperation.TOP_VALUES,
+                        column="invalid_col_name_not_existing",
+                        reason="Repair attempt that fails validation"
+                    )
+                ]
+            )
+        return await self.create_analysis_plan(question, dataset_summary)
+
     async def generate_report(
         self, question: str, summary: DatasetSummary, results: list[AnalysisResult]
     ) -> ProviderReport:

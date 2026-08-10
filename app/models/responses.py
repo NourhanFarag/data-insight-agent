@@ -19,3 +19,5 @@ class AnalysisResponse(BaseModel):
     findings: List[Finding] = Field(..., description="Verified findings grounded to calculation results")
     limitations: List[str] = Field(..., description="Identified limitations or constraints of the data")
     recommendations: List[Recommendation] = Field(..., description="Traceable recommendations linked back to findings")
+    plan_repair_attempted: bool = Field(default=False, description="Whether plan repair was attempted")
+    plan_repair_succeeded: bool = Field(default=False, description="Whether plan repair succeeded")

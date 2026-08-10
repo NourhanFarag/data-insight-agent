@@ -7,7 +7,7 @@ from app.services.analysis_executor import AnalysisExecutor
 from app.services.plan_validator import PlanValidator
 from app.services.grounding_validator import GroundingValidator
 from app.providers import get_provider
-from app.core.exceptions import DatasetValidationError
+from app.core.exceptions import DatasetValidationError, PlanValidationError
 
 logger = logging.getLogger("app.services.agent_service")
 logging.basicConfig(level=logging.INFO)
@@ -17,12 +17,16 @@ class DataInsightAgent:
         self.executor = AnalysisExecutor()
         self.plan_validator = PlanValidator()
         self.grounding_validator = GroundingValidator()
+        self.plan_repair_attempted = False
+        self.plan_repair_succeeded = False
 
     async def analyze(self, df: pd.DataFrame, question: str) -> AnalysisResponse:
         """Orchestrates the entire planning-execution-grounding loop on the dataset.
 
         Does not reveal raw CSV data to the LLM.
         """
+        self.plan_repair_attempted = False
+        self.plan_repair_succeeded = False
         # 1. Validate question input
         if not question or not question.strip():
             raise DatasetValidationError("Question cannot be empty.", status_code=400)
@@ -45,7 +49,29 @@ class DataInsightAgent:
 
         # 5. Validate the plan against dataset schemas/limits
         logger.info("Validating proposed analysis plan...")
-        self.plan_validator.validate(plan, summary)
+        try:
+            self.plan_validator.validate(plan, summary)
+        except PlanValidationError as exc:
+            logger.warning(f"Initial plan validation failed: {exc}. Attempting plan repair...")
+            self.plan_repair_attempted = True
+
+            # Sanitize feedback
+            sanitized_feedback = str(exc)
+
+            # Request repaired plan
+            plan = await provider.repair_analysis_plan(
+                question=question,
+                dataset_summary=summary,
+                invalid_plan=plan,
+                validation_feedback=sanitized_feedback
+            )
+
+            # Re-validate the repaired plan
+            logger.info("Validating repaired analysis plan...")
+            self.plan_validator.validate(plan, summary)
+
+            logger.info("Plan repair succeeded.")
+            self.plan_repair_succeeded = True
 
         # 6. Execute approved steps using deterministic AnalysisExecutor
         results = []
@@ -73,5 +99,7 @@ class DataInsightAgent:
             analysis_results=results,
             findings=report.findings,
             limitations=report.limitations,
-            recommendations=report.recommendations
+            recommendations=report.recommendations,
+            plan_repair_attempted=self.plan_repair_attempted,
+            plan_repair_succeeded=self.plan_repair_succeeded
         )

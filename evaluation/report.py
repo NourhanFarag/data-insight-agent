@@ -12,6 +12,11 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     schema_valid_cnt = sum(1 for r in results if r.planner_scores.schema_valid)
     plan_valid_cnt = sum(1 for r in results if r.planner_scores.plan_valid)
 
+    # Repair counts
+    plan_repair_attempted_cnt = sum(1 for r in results if r.planner_scores.plan_repair_attempted)
+    plan_repair_succeeded_cnt = sum(1 for r in results if r.planner_scores.plan_repair_succeeded)
+    initial_plan_valid_cnt = sum(1 for r in results if r.planner_scores.plan_valid and not r.planner_scores.plan_repair_attempted)
+
     avg_recall = sum(r.planner_scores.required_operation_recall for r in results) / total if total else 0.0
     avg_irrelevant = sum(r.planner_scores.irrelevant_operation_rate for r in results) / total if total else 0.0
 
@@ -39,6 +44,11 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
 
     schema_valid_rate = max(0.0, min(1.0, schema_valid_cnt / total if total else 0.0))
     plan_valid_rate = max(0.0, min(1.0, plan_valid_cnt / total if total else 0.0))
+    initial_plan_valid_rate = max(0.0, min(1.0, initial_plan_valid_cnt / total if total else 0.0))
+    post_repair_plan_valid_rate = plan_valid_rate
+    plan_repair_rate = max(0.0, min(1.0, plan_repair_attempted_cnt / total if total else 0.0))
+    repair_success_rate = max(0.0, min(1.0, plan_repair_succeeded_cnt / plan_repair_attempted_cnt if plan_repair_attempted_cnt > 0 else 0.0))
+
     execution_rate = max(0.0, min(1.0, execution_passed_cnt / total if total else 0.0))
     grounding_rate = max(0.0, min(1.0, grounding_passed_cnt / completed if completed else 0.0))
     end_to_end_rate = max(0.0, min(1.0, success_cnt / total if total else 0.0))
@@ -70,7 +80,10 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     md.append(f"| **Cases Attempted** | Total cases run | {total} | - | - |")
     md.append(f"| **Cases Completed** | Runs without runtime exceptions | {completed} | - | - |")
     md.append(f"| **Planner Schema-Valid Rate** | `schema_valid_runs / attempted` | {schema_valid_rate:.1%} | 100% | {'PASS' if schema_valid_rate >= 1.0 else 'FAIL'} |")
-    md.append(f"| **Plan-Valid Rate** | `validator_accepted_runs / attempted` | {plan_valid_rate:.1%} | >= 90% | {'PASS' if plan_valid_rate >= 0.90 else 'FAIL'} |")
+    md.append(f"| **Initial Plan-Valid Rate** | `initial_valid_runs / attempted` | {initial_plan_valid_rate:.1%} | - | - |")
+    md.append(f"| **Post-Repair Plan-Valid Rate** | `validator_accepted_runs / attempted` | {post_repair_plan_valid_rate:.1%} | >= 90% | {'PASS' if post_repair_plan_valid_rate >= 0.90 else 'FAIL'} |")
+    md.append(f"| **Plan Repair Rate** | `plan_repair_attempted / attempted` | {plan_repair_rate:.1%} | - | - |")
+    md.append(f"| **Repair Success Rate** | `plan_repair_succeeded / plan_repair_attempted` | {repair_success_rate:.1%} | - | - |")
     md.append(f"| **Required-Operation Recall** | `selected_required_ops / expected_ops` | {avg_recall:.1%} | >= 85% | {'PASS' if avg_recall >= 0.85 else 'FAIL'} |")
     md.append(f"| **Average Irrelevant-Operation Rate** | `irrelevant_steps / total_steps` | {avg_irrelevant:.1%} | - | - |")
     md.append(f"| **Execution Correctness Rate** | `pandas_execution_correct / attempted` | {execution_rate:.1%} | 100% | {'PASS' if execution_rate >= 1.0 else 'FAIL'} |")
@@ -105,8 +118,8 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
         md.append("")
 
         md.append("## Case Breakdown")
-        md.append("| Case ID | Model | Success | Latency | Recall | Irrelevant | Causal Flags | Num Flags | Relevance | Finding | Recs | Restraint | Clarity |")
-        md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        md.append("| Case ID | Model | Success | Latency | Recall | Irrelevant | Causal Flags | Num Flags | Repair Attempted | Repair Succeeded | Relevance | Finding | Recs | Restraint | Clarity |")
+        md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
         for r in results:
             h = r.human_scores
             h_rel = h.relevance if h else "-"
@@ -118,19 +131,24 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
                 f"| `{r.case_id}` | `{r.model}` | {'✅' if r.final_success else '❌'} | "
                 f"{r.latency_ms:.0f} ms | {r.planner_scores.required_operation_recall:.0%} | "
                 f"{r.planner_scores.irrelevant_operation_rate:.0%} | {r.grounding_scores.causal_claim_flags} | "
-                f"{r.grounding_scores.unsupported_numeric_claim_flags} | {h_rel} | {h_fq} | {h_rec} | {h_rest} | {h_clar} |"
+                f"{r.grounding_scores.unsupported_numeric_claim_flags} | "
+                f"{'Yes' if r.planner_scores.plan_repair_attempted else 'No'} | "
+                f"{'Yes' if r.planner_scores.plan_repair_succeeded else 'No'} | "
+                f"{h_rel} | {h_fq} | {h_rec} | {h_rest} | {h_clar} |"
             )
     else:
         md.append("## Case Breakdown")
-        md.append("| Case ID | Model | Success | Latency | Error Category | Recall | Irrelevant Rate | Causal Flags | Num Flags |")
-        md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        md.append("| Case ID | Model | Success | Latency | Error Category | Recall | Irrelevant Rate | Causal Flags | Num Flags | Repair Attempted | Repair Succeeded |")
+        md.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
         for r in results:
             err = r.error_category if r.error_category else "None"
             md.append(
                 f"| `{r.case_id}` | `{r.model}` | {'✅' if r.final_success else '❌'} | "
                 f"{r.latency_ms:.0f} ms | `{err}` | {r.planner_scores.required_operation_recall:.0%} | "
                 f"{r.planner_scores.irrelevant_operation_rate:.0%} | {r.grounding_scores.causal_claim_flags} | "
-                f"{r.grounding_scores.unsupported_numeric_claim_flags} |"
+                f"{r.grounding_scores.unsupported_numeric_claim_flags} | "
+                f"{'Yes' if r.planner_scores.plan_repair_attempted else 'No'} | "
+                f"{'Yes' if r.planner_scores.plan_repair_succeeded else 'No'} |"
             )
 
     return "\n".join(md)

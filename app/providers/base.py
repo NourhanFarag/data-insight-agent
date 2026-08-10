@@ -9,6 +9,17 @@ class BaseProvider(ABC):
         pass
 
     @abstractmethod
+    async def repair_analysis_plan(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        invalid_plan: AnalysisPlan,
+        validation_feedback: str,
+    ) -> AnalysisPlan:
+        """Repairs an invalid AnalysisPlan using validation feedback."""
+        pass
+
+    @abstractmethod
     async def generate_report(self, question: str, summary: DatasetSummary, results: list[AnalysisResult]) -> ProviderReport:
         """Generates a final, evidence-grounded report containing findings and recommendations (no raw data)."""
         pass

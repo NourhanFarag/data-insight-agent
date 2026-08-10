@@ -55,6 +55,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
 
         # 1. Score proposed AnalysisPlan
         planner_scores = score_plan(response.analysis_plan, case, response.dataset_summary)
+        planner_scores.plan_repair_attempted = response.plan_repair_attempted
+        planner_scores.plan_repair_succeeded = response.plan_repair_succeeded
 
         # 2. Verify deterministic calculations
         execution_passed = verify_execution(response.analysis_results, case)
@@ -96,7 +98,9 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
             required_operation_recall=0.0,
             irrelevant_operation_rate=0.0,
             invalid_column_attempts=0,
-            planner_success=False
+            planner_success=False,
+            plan_repair_attempted=agent.plan_repair_attempted,
+            plan_repair_succeeded=agent.plan_repair_succeeded
         )
         grounding_scores = GroundingScores(
             structurally_grounded=False,
