@@ -6,7 +6,7 @@ from app.models.responses import DatasetSummary
 from app.services.plan_validator import PlanValidator
 from app.services.grounding_validator import GroundingValidator
 from app.core.exceptions import PlanValidationError, GroundingValidationError
-from evaluation.models import EvaluationCase, PlannerScores, GroundingScores, ExpectedResultCheck
+from evaluation.models import EvaluationCase, PlannerScores, GroundingScores, ExpectedResultCheck, ExecutionCheckDiagnostic
 
 def _extract_all_numbers(text: str) -> Set[float]:
     """Helper to extract numbers from explanation prose, ignoring markdown links/refs."""
@@ -247,7 +247,6 @@ def diagnose_execution(
     case: EvaluationCase,
 ) -> List[ExecutionCheckDiagnostic]:
     """Inspects expected result checks and explains why each comparison passed or failed."""
-    from evaluation.models import ExecutionCheckDiagnostic
     diagnostics = []
 
     for check in case.expected_result_checks:
