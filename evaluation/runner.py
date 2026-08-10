@@ -66,6 +66,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
     failure_stage = None
     exception_type = None
     safe_error_detail = None
+    rep_attempted = False
+    rep_succeeded = False
 
     summary = DatasetInspector.inspect(df)
     agent = DataInsightAgent()
@@ -89,6 +91,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
             limitations=response.limitations,
             recommendations=response.recommendations
         )
+        rep_attempted = response.report_repair_attempted
+        rep_succeeded = response.report_repair_succeeded
 
     except PlanValidationError as exc:
         error_cat = "plan_validation_failed"
@@ -97,6 +101,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
         safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "invalid_plan", None)
         results_list = getattr(exc, "analysis_results", None)
+        rep_attempted = getattr(exc, "report_repair_attempted", False)
+        rep_succeeded = getattr(exc, "report_repair_succeeded", False)
 
     except GroundingValidationError as exc:
         error_cat = "grounding_validation_failed"
@@ -106,6 +112,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
         selected_plan = getattr(exc, "analysis_plan", None)
         results_list = getattr(exc, "analysis_results", None)
         report_obj = getattr(exc, "report", None)
+        rep_attempted = getattr(exc, "report_repair_attempted", False)
+        rep_succeeded = getattr(exc, "report_repair_succeeded", False)
 
     except ProviderError as exc:
         error_cat = "provider_error"
@@ -114,6 +122,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
         safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "analysis_plan", None)
         results_list = getattr(exc, "analysis_results", None)
+        rep_attempted = getattr(exc, "report_repair_attempted", False)
+        rep_succeeded = getattr(exc, "report_repair_succeeded", False)
 
     except Exception as exc:
         error_cat = "unknown_error"
@@ -122,6 +132,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
         safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "analysis_plan", None)
         results_list = getattr(exc, "analysis_results", None)
+        rep_attempted = getattr(exc, "report_repair_attempted", False)
+        rep_succeeded = getattr(exc, "report_repair_succeeded", False)
 
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -160,6 +172,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
     if report_obj and results_list:
         try:
             grounding_scores = score_report(report_obj, results_list, case)
+            grounding_scores.report_repair_attempted = rep_attempted
+            grounding_scores.report_repair_succeeded = rep_succeeded
         except Exception:
             pass
 
@@ -167,7 +181,9 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
         grounding_scores = GroundingScores(
             structurally_grounded=False,
             unsupported_numeric_claim_flags=0,
-            causal_claim_flags=0
+            causal_claim_flags=0,
+            report_repair_attempted=rep_attempted,
+            report_repair_succeeded=rep_succeeded
         )
 
     # 4. Final end-to-end success evaluation

@@ -21,3 +21,5 @@ class AnalysisResponse(BaseModel):
     recommendations: List[Recommendation] = Field(..., description="Traceable recommendations linked back to findings")
     plan_repair_attempted: bool = Field(default=False, description="Whether plan repair was attempted")
     plan_repair_succeeded: bool = Field(default=False, description="Whether plan repair succeeded")
+    report_repair_attempted: bool = Field(default=False, description="Whether report repair was attempted")
+    report_repair_succeeded: bool = Field(default=False, description="Whether report repair succeeded")

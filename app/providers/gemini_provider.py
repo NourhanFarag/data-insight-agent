@@ -6,7 +6,12 @@ from app.models.responses import DatasetSummary
 from app.models.analysis import AnalysisPlan, ProviderReport, AnalysisResult
 from app.core.exceptions import ProviderError
 from app.prompts.planner import PLANNER_SYSTEM_PROMPT, format_planner_user_prompt, REPAIR_SYSTEM_PROMPT, format_repair_user_prompt
-from app.prompts.reporter import REPORTER_SYSTEM_PROMPT, format_reporter_user_prompt
+from app.prompts.reporter import (
+    REPORTER_SYSTEM_PROMPT,
+    format_reporter_user_prompt,
+    REPORT_REPAIR_SYSTEM_PROMPT,
+    format_report_repair_user_prompt,
+)
 
 class GeminiProvider(BaseProvider):
     def _get_client(self) -> genai.Client:
@@ -129,3 +134,48 @@ class GeminiProvider(BaseProvider):
             if settings.GEMINI_API_KEY in error_msg:
                 error_msg = error_msg.replace(settings.GEMINI_API_KEY, "GEMINI_API_KEY")
             raise ProviderError(f"Gemini reporter request failed: {error_msg}")
+
+    async def repair_report(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        analysis_results: list[AnalysisResult],
+        invalid_report: ProviderReport,
+        validation_feedback: str,
+    ) -> ProviderReport:
+        """Invokes Gemini model using GenAI Interactions API to repair a ProviderReport."""
+        client = self._get_client()
+        sys_prompt = REPORT_REPAIR_SYSTEM_PROMPT
+
+        results_serialized = json.dumps([r.model_dump() for r in analysis_results], indent=2)
+        user_prompt = format_report_repair_user_prompt(
+            question,
+            dataset_summary.model_dump_json(indent=2),
+            results_serialized,
+            invalid_report.model_dump_json(indent=2),
+            validation_feedback
+        )
+        input_text = f"System Instructions:\n{sys_prompt}\n\nUser Input:\n{user_prompt}"
+
+        try:
+            interaction = client.interactions.create(
+                model=settings.GEMINI_MODEL,
+                input=input_text,
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": ProviderReport.model_json_schema(),
+                },
+            )
+
+            text_output = getattr(interaction, "output_text", None)
+            if not text_output:
+                raise ProviderError("Gemini returned no structured output during report repair.")
+
+            return ProviderReport.model_validate_json(text_output)
+
+        except Exception as e:
+            error_msg = str(e)
+            if settings.GEMINI_API_KEY in error_msg:
+                error_msg = error_msg.replace(settings.GEMINI_API_KEY, "GEMINI_API_KEY")
+            raise ProviderError(f"Gemini report repair request failed: {error_msg}")

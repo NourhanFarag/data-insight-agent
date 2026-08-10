@@ -17,6 +17,18 @@ from app.core.exceptions import (
 logger = logging.getLogger("app.services.agent_service")
 logging.basicConfig(level=logging.INFO)
 
+def _sanitize_validation_feedback(msg: str) -> str:
+    if not msg:
+        return "Unknown validation error"
+    msg = msg[:300]
+    msg_lower = msg.lower()
+    suspicious = ["ignore", "system", "instruction", "select", "drop", "union", "delete", "insert", "secret", "whoami", "os.system"]
+    if any(s in msg_lower for s in suspicious):
+        return "Sanitized validation error due to security policy"
+    if "redacted" in msg_lower:
+        return "Sanitized validation error referencing redacted content"
+    return msg
+
 class DataInsightAgent:
     def __init__(self):
         self.executor = AnalysisExecutor()
@@ -109,19 +121,28 @@ class DataInsightAgent:
             exc.failure_stage = "execution"
             raise exc
 
+        # 6.5. Sanitize results before they are passed to any provider or validation steps
+        from app.core.safety import _sanitize_value
+        sanitized_results = []
+        for res in results:
+            sanitized_res = res.model_copy(update={
+                "computed_result": _sanitize_value(res.computed_result)
+            })
+            sanitized_results.append(sanitized_res)
+
         # 7. Request structured report/interpretations from provider
         logger.info("Requesting structured analysis report interpretation...")
         try:
-            report = await provider.generate_report(question, summary, results)
+            report = await provider.generate_report(question, summary, sanitized_results)
         except ProviderError as pe:
             pe.analysis_plan = plan
-            pe.analysis_results = results
+            pe.analysis_results = sanitized_results
             pe.failure_stage = "report_generation"
             raise pe
         except Exception as e:
             try:
                 e.analysis_plan = plan
-                e.analysis_results = results
+                e.analysis_results = sanitized_results
             except Exception:
                 pass
             e.failure_stage = "report_generation"
@@ -129,14 +150,47 @@ class DataInsightAgent:
 
         # 8. Validate report grounding references
         logger.info("Validating report grounding and citations...")
+        report_repair_attempted = False
+        report_repair_succeeded = False
         try:
-            self.grounding_validator.validate(report, results)
+            self.grounding_validator.validate(report, sanitized_results)
         except GroundingValidationError as gve:
-            gve.analysis_plan = plan
-            gve.analysis_results = results
-            gve.report = report
-            gve.failure_stage = "grounding_validation"
-            raise gve
+            logger.warning(f"Initial report grounding validation failed: {gve}. Attempting report repair...")
+            report_repair_attempted = True
+            sanitized_feedback = _sanitize_validation_feedback(str(gve))
+
+            try:
+                repaired_report = await provider.repair_report(
+                    question=question,
+                    dataset_summary=summary,
+                    analysis_results=sanitized_results,
+                    invalid_report=report,
+                    validation_feedback=sanitized_feedback
+                )
+            except Exception as rep_err:
+                rep_err.analysis_plan = plan
+                rep_err.analysis_results = sanitized_results
+                rep_err.report = report
+                rep_err.failure_stage = "grounding_validation"
+                rep_err.report_repair_attempted = report_repair_attempted
+                rep_err.report_repair_succeeded = report_repair_succeeded
+                raise rep_err
+
+            # Re-validate repaired report
+            logger.info("Validating repaired report grounding and citations...")
+            try:
+                self.grounding_validator.validate(repaired_report, sanitized_results)
+                report = repaired_report
+                report_repair_succeeded = True
+                logger.info("Report repair succeeded.")
+            except GroundingValidationError as repair_exc:
+                repair_exc.analysis_plan = plan
+                repair_exc.analysis_results = sanitized_results
+                repair_exc.report = repaired_report
+                repair_exc.failure_stage = "grounding_validation"
+                repair_exc.report_repair_attempted = report_repair_attempted
+                repair_exc.report_repair_succeeded = report_repair_succeeded
+                raise repair_exc
 
         logger.info("Analysis completed successfully.")
 
@@ -145,10 +199,12 @@ class DataInsightAgent:
             question=question,
             dataset_summary=summary,
             analysis_plan=plan,
-            analysis_results=results,
+            analysis_results=sanitized_results,
             findings=report.findings,
             limitations=report.limitations,
             recommendations=report.recommendations,
             plan_repair_attempted=self.plan_repair_attempted,
-            plan_repair_succeeded=self.plan_repair_succeeded
+            plan_repair_succeeded=self.plan_repair_succeeded,
+            report_repair_attempted=report_repair_attempted,
+            report_repair_succeeded=report_repair_succeeded
         )

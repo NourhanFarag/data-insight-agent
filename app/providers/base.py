@@ -23,3 +23,15 @@ class BaseProvider(ABC):
     async def generate_report(self, question: str, summary: DatasetSummary, results: list[AnalysisResult]) -> ProviderReport:
         """Generates a final, evidence-grounded report containing findings and recommendations (no raw data)."""
         pass
+
+    @abstractmethod
+    async def repair_report(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        analysis_results: list[AnalysisResult],
+        invalid_report: ProviderReport,
+        validation_feedback: str,
+    ) -> ProviderReport:
+        """Repairs a report that failed grounding validation using validation feedback."""
+        pass

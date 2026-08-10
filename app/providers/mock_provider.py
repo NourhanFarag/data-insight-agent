@@ -203,3 +203,78 @@ class MockProvider(BaseProvider):
             limitations=limitations,
             recommendations=recommendations
         )
+
+    async def repair_report(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        analysis_results: list[AnalysisResult],
+        invalid_report: ProviderReport,
+        validation_feedback: str,
+    ) -> ProviderReport:
+        """Repairs a report that failed grounding validation."""
+        # For testing / mock validation repair
+        if "fail_report_repair" in question.lower() or "fail_report_repair" in validation_feedback.lower():
+            # Returns an invalid report to test fail closed
+            return ProviderReport(
+                findings=[
+                    Finding(
+                        id="finding_1",
+                        title="Failed repair",
+                        explanation="Failed repair",
+                        evidence_refs=["invalid_ref_still_here"],
+                        confidence=ConfidenceLevel.LOW
+                    )
+                ],
+                limitations=["None"],
+                recommendations=[]
+            )
+
+        fixed_findings = []
+        for idx, finding in enumerate(invalid_report.findings):
+            # Check if evidence_refs contains invalid values
+            evidence_refs = []
+            for ref in finding.evidence_refs:
+                if ref.startswith("result_") and any(r.result_id == ref for r in analysis_results):
+                    evidence_refs.append(ref)
+                else:
+                    # Replace with a valid result ID if available
+                    if analysis_results:
+                        evidence_refs.append(analysis_results[0].result_id)
+            if not evidence_refs and analysis_results:
+                evidence_refs = [analysis_results[0].result_id]
+
+            fixed_findings.append(
+                Finding(
+                    id=finding.id if finding.id.startswith("finding_") else f"finding_{idx + 1}",
+                    title=finding.title,
+                    explanation=finding.explanation,
+                    evidence_refs=evidence_refs,
+                    confidence=finding.confidence
+                )
+            )
+
+        fixed_recs = []
+        for idx, rec in enumerate(invalid_report.recommendations):
+            finding_refs = []
+            for f_ref in rec.finding_refs:
+                if any(f.id == f_ref for f in fixed_findings):
+                    finding_refs.append(f_ref)
+                else:
+                    if fixed_findings:
+                        finding_refs.append(fixed_findings[0].id)
+            fixed_recs.append(
+                Recommendation(
+                    id=rec.id if rec.id.startswith("recommendation_") else f"recommendation_{idx + 1}",
+                    priority=rec.priority,
+                    action=rec.action,
+                    rationale=rec.rationale,
+                    finding_refs=finding_refs
+                )
+            )
+
+        return ProviderReport(
+            findings=fixed_findings,
+            limitations=invalid_report.limitations or ["The dataset has limitations."],
+            recommendations=fixed_recs
+        )

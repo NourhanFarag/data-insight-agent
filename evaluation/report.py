@@ -55,6 +55,11 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     grounding_passed_cnt = sum(1 for r in results if r.grounding_scores.structurally_grounded)
     grounding_validation_pass_rate = max(0.0, min(1.0, grounding_passed_cnt / total if total else 0.0))
 
+    report_repair_attempted_cnt = sum(1 for r in results if r.grounding_scores.report_repair_attempted)
+    report_repair_succeeded_cnt = sum(1 for r in results if r.grounding_scores.report_repair_succeeded)
+    report_repair_rate = max(0.0, min(1.0, report_repair_attempted_cnt / total if total else 0.0))
+    report_repair_success_rate = max(0.0, min(1.0, report_repair_succeeded_cnt / report_repair_attempted_cnt if report_repair_attempted_cnt > 0 else 0.0))
+
     execution_rate = max(0.0, min(1.0, execution_passed_cnt / total if total else 0.0))
     grounding_rate = max(0.0, min(1.0, grounding_passed_cnt / completed if completed else 0.0))
     end_to_end_rate = max(0.0, min(1.0, success_cnt / total if total else 0.0))
@@ -98,6 +103,8 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     md.append(f"| **Execution Correctness Rate** | `pandas_execution_correct / attempted` | {execution_rate:.1%} | 100% | {'PASS' if execution_rate >= 1.0 else 'FAIL'} |")
     md.append(f"| **Structural Grounding Rate (Completed)** | `grounded_runs / completed_runs` | {grounding_rate:.1%} | - | - |")
     md.append(f"| **Grounding Validation Pass Rate (Attempted)** | `grounded_runs / attempted_cases` | {grounding_validation_pass_rate:.1%} | 100% | {'PASS' if grounding_validation_pass_rate >= 1.0 else 'FAIL'} |")
+    md.append(f"| **Report Repair Rate** | `report_repair_attempted / attempted` | {report_repair_rate:.1%} | - | - |")
+    md.append(f"| **Report Repair Success Rate** | `report_repair_succeeded / report_repair_attempted` | {report_repair_success_rate:.1%} | - | - |")
     md.append(f"| **Causal-Claim Flag Count** | Keyword count in descriptive cases | {total_causal_flags} | 0 | {'PASS' if total_causal_flags == 0 else 'FAIL'} |")
     md.append(f"| **Unsupported-Numeric-Claim Flag Count** | Metric mismatch flags in report | {total_numeric_flags} | 0 | {'PASS' if total_numeric_flags == 0 else 'FAIL'} |")
     md.append(f"| **End-to-End Success Rate** | `success_runs / attempted` | {end_to_end_rate:.1%} | >= 80% | {'PASS' if end_to_end_rate >= 0.80 else 'FAIL'} |")

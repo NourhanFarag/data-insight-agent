@@ -6,7 +6,12 @@ from app.models.responses import DatasetSummary
 from app.models.analysis import AnalysisPlan, ProviderReport, AnalysisResult
 from app.core.exceptions import ProviderError
 from app.prompts.planner import PLANNER_SYSTEM_PROMPT, format_planner_user_prompt, REPAIR_SYSTEM_PROMPT, format_repair_user_prompt
-from app.prompts.reporter import REPORTER_SYSTEM_PROMPT, format_reporter_user_prompt
+from app.prompts.reporter import (
+    REPORTER_SYSTEM_PROMPT,
+    format_reporter_user_prompt,
+    REPORT_REPAIR_SYSTEM_PROMPT,
+    format_report_repair_user_prompt,
+)
 
 class OpenAIProvider(BaseProvider):
     def _get_client(self) -> OpenAI:
@@ -113,3 +118,45 @@ class OpenAIProvider(BaseProvider):
             if settings.OPENAI_API_KEY in error_msg:
                 error_msg = error_msg.replace(settings.OPENAI_API_KEY, "OPENAI_API_KEY")
             raise ProviderError(f"OpenAI reporter request failed: {error_msg}")
+
+    async def repair_report(
+        self,
+        question: str,
+        dataset_summary: DatasetSummary,
+        analysis_results: list[AnalysisResult],
+        invalid_report: ProviderReport,
+        validation_feedback: str,
+    ) -> ProviderReport:
+        """Invokes OpenAI completions API with Responses API structured parsing to repair ProviderReport."""
+        client = self._get_client()
+        sys_prompt = REPORT_REPAIR_SYSTEM_PROMPT
+
+        results_serialized = json.dumps([res.model_dump() for res in analysis_results], indent=2)
+        user_prompt = format_report_repair_user_prompt(
+            question,
+            dataset_summary.model_dump_json(indent=2),
+            results_serialized,
+            invalid_report.model_dump_json(indent=2),
+            validation_feedback
+        )
+
+        try:
+            response = client.responses.parse(
+                model=settings.OPENAI_MODEL,
+                input=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                text_format=ProviderReport
+            )
+
+            parsed_report = getattr(response, "output_parsed", None)
+            if not parsed_report:
+                raise ProviderError("OpenAI provider returned empty parsed repaired report.")
+            return parsed_report
+
+        except Exception as e:
+            error_msg = str(e)
+            if settings.OPENAI_API_KEY in error_msg:
+                error_msg = error_msg.replace(settings.OPENAI_API_KEY, "OPENAI_API_KEY")
+            raise ProviderError(f"OpenAI report repair request failed: {error_msg}")

@@ -39,6 +39,8 @@ class GroundingScores(BaseModel):
     structurally_grounded: bool
     unsupported_numeric_claim_flags: int
     causal_claim_flags: int
+    report_repair_attempted: bool = False
+    report_repair_succeeded: bool = False
 
 class HumanScores(BaseModel):
     relevance: Optional[int] = None
