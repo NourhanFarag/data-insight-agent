@@ -1,6 +1,6 @@
 from enum import Enum
-from typing import Optional, Union, List, Dict
-from pydantic import BaseModel, Field
+from typing import Optional, Union, List, Dict, Any
+from pydantic import BaseModel, Field, field_validator
 
 class AnalysisOperation(str, Enum):
     COUNT = "COUNT"
@@ -35,6 +35,13 @@ class AnalysisStep(BaseModel):
     second_column: Optional[str] = Field(None, description="The second column for CORRELATION operations")
     limit: Optional[int] = Field(None, description="Enforced maximum limit of rows/values returned (e.g. for TOP_VALUES)")
     reason: Optional[str] = Field(None, description="The analytical rationale for performing this step")
+
+    @field_validator("column", "group_by", "second_column", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v: Any) -> Any:
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 # Type-safe structure for computed result instead of standard Any
 ComputedResultType = Union[float, int, str, Dict[str, Union[float, int, str, None]], List[Union[float, int, str, Dict[str, Union[float, int, str, None]], None]], None]

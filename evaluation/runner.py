@@ -1,14 +1,25 @@
 import os
 import json
 import time
+from typing import List, Any, Optional
 import pandas as pd
-from typing import List
 from evaluation.models import EvaluationCase, EvaluationResult, PlannerScores, GroundingScores
 from evaluation.scorers import score_plan, verify_execution, score_report, diagnose_execution
 from app.services.agent_service import DataInsightAgent
+from app.services.dataset_inspector import DatasetInspector
 from app.models.analysis import ProviderReport
 from app.core.exceptions import PlanValidationError, GroundingValidationError, ProviderError
 from app.config import settings
+
+def _sanitize_error_message(msg: str) -> str:
+    if not msg:
+        return "Unknown error"
+    msg = msg[:200]
+    msg_lower = msg.lower()
+    suspicious = ["ignore", "system", "instruction", "select", "drop", "union", "delete", "insert", "secret", "whoami", "os.system"]
+    if any(s in msg_lower for s in suspicious):
+        return "Sanitized execution error due to security policy"
+    return msg
 
 def resolve_model_name(provider: str) -> str:
     """Centralized helper to resolve the model name for a provider."""
@@ -52,70 +63,80 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
 
     start_time = time.perf_counter()
     error_cat = None
+    failure_stage = None
+    exception_type = None
+    safe_error_detail = None
+
+    summary = DatasetInspector.inspect(df)
+    agent = DataInsightAgent()
+
+    # Pre-declare variables for phase preservation
+    selected_plan = None
+    results_list = None
+    report_obj = None
+
     planner_scores = None
     execution_passed = False
     grounding_scores = None
-    final_success = False
-
-    # Initialize the orchestrator agent service
-    agent = DataInsightAgent()
 
     try:
         response = await agent.analyze(df, case.question)
 
-        # 1. Score proposed AnalysisPlan
-        planner_scores = score_plan(response.analysis_plan, case, response.dataset_summary)
-        planner_scores.plan_repair_attempted = response.plan_repair_attempted
-        planner_scores.plan_repair_succeeded = response.plan_repair_succeeded
-
-        # 2. Verify deterministic calculations
-        execution_passed = verify_execution(response.analysis_results, case)
-
-        # 3. Score findings/grounding
+        selected_plan = response.analysis_plan
+        results_list = response.analysis_results
         report_obj = ProviderReport(
             findings=response.findings,
             limitations=response.limitations,
             recommendations=response.recommendations
         )
-        grounding_scores = score_report(report_obj, response.analysis_results, case)
-
-        # 4. Final end-to-end success evaluation
-        # Succeeded on plan AND calculation matches expected ground-truth AND report grounded with 0 flags
-        final_success = (
-            planner_scores.planner_success
-            and execution_passed
-            and grounding_scores.structurally_grounded
-            and grounding_scores.causal_claim_flags == 0
-            and grounding_scores.unsupported_numeric_claim_flags == 0
-        )
-
-        selected_plan = response.analysis_plan
-        execution_diagnostics = diagnose_execution(response.analysis_results, case)
 
     except PlanValidationError as exc:
         error_cat = "plan_validation_failed"
+        failure_stage = getattr(exc, "failure_stage", "plan_validation")
+        exception_type = exc.__class__.__name__
+        safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "invalid_plan", None)
-        execution_diagnostics = diagnose_execution(None, case)
+        results_list = getattr(exc, "analysis_results", None)
+
     except GroundingValidationError as exc:
         error_cat = "grounding_validation_failed"
+        failure_stage = getattr(exc, "failure_stage", "grounding_validation")
+        exception_type = exc.__class__.__name__
+        safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "analysis_plan", None)
         results_list = getattr(exc, "analysis_results", None)
-        execution_diagnostics = diagnose_execution(results_list, case)
+        report_obj = getattr(exc, "report", None)
+
     except ProviderError as exc:
         error_cat = "provider_error"
+        failure_stage = getattr(exc, "failure_stage", "report_generation")
+        exception_type = exc.__class__.__name__
+        safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "analysis_plan", None)
         results_list = getattr(exc, "analysis_results", None)
-        execution_diagnostics = diagnose_execution(results_list, case)
+
     except Exception as exc:
         error_cat = "unknown_error"
+        failure_stage = getattr(exc, "failure_stage", "planning")
+        exception_type = exc.__class__.__name__
+        safe_error_detail = _sanitize_error_message(str(exc))
         selected_plan = getattr(exc, "analysis_plan", None)
         results_list = getattr(exc, "analysis_results", None)
-        execution_diagnostics = diagnose_execution(results_list, case)
 
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-    # Fallback score objects on exception
-    if error_cat:
+    # Phase-Preservation Scoring Logic:
+    # 1. Score proposed AnalysisPlan
+    if selected_plan:
+        try:
+            planner_scores = score_plan(selected_plan, case, summary)
+            # Apply repair flags from agent state
+            planner_scores.plan_repair_attempted = agent.plan_repair_attempted
+            planner_scores.plan_repair_succeeded = agent.plan_repair_succeeded
+        except Exception:
+            pass
+
+    if not planner_scores:
         planner_scores = PlannerScores(
             schema_valid=False,
             plan_valid=False,
@@ -126,13 +147,40 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
             plan_repair_attempted=agent.plan_repair_attempted,
             plan_repair_succeeded=agent.plan_repair_succeeded
         )
+
+    # 2. Score execution
+    if results_list and error_cat not in ("plan_validation_failed", "unknown_error", "provider_error"):
+        if failure_stage != "execution":
+            try:
+                execution_passed = verify_execution(results_list, case)
+            except Exception:
+                execution_passed = False
+
+    # 3. Score findings/grounding
+    if report_obj and results_list:
+        try:
+            grounding_scores = score_report(report_obj, results_list, case)
+        except Exception:
+            pass
+
+    if not grounding_scores:
         grounding_scores = GroundingScores(
             structurally_grounded=False,
             unsupported_numeric_claim_flags=0,
             causal_claim_flags=0
         )
-        execution_passed = False
-        final_success = False
+
+    # 4. Final end-to-end success evaluation
+    final_success = (
+        error_cat is None
+        and planner_scores.planner_success
+        and execution_passed
+        and grounding_scores.structurally_grounded
+        and grounding_scores.causal_claim_flags == 0
+        and grounding_scores.unsupported_numeric_claim_flags == 0
+    )
+
+    execution_diagnostics = diagnose_execution(results_list, case)
 
     return EvaluationResult(
         case_id=case.case_id,
@@ -145,5 +193,8 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
         error_category=error_cat,
         final_success=final_success,
         selected_plan=selected_plan,
-        execution_diagnostics=execution_diagnostics
+        execution_diagnostics=execution_diagnostics,
+        failure_stage=failure_stage,
+        exception_type=exception_type,
+        safe_error_detail=safe_error_detail
     )

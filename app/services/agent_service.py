@@ -50,7 +50,11 @@ class DataInsightAgent:
 
         # 4. Request an AnalysisPlan from the provider
         logger.info(f"Requesting analysis plan for question: '{question}'")
-        plan = await provider.create_analysis_plan(question, summary)
+        try:
+            plan = await provider.create_analysis_plan(question, summary)
+        except Exception as e:
+            e.failure_stage = "planning"
+            raise e
 
         # 5. Validate the plan against dataset schemas/limits
         logger.info("Validating proposed analysis plan...")
@@ -58,6 +62,7 @@ class DataInsightAgent:
             self.plan_validator.validate(plan, summary)
         except PlanValidationError as exc:
             exc.invalid_plan = plan
+            exc.failure_stage = "plan_validation"
             logger.warning(f"Initial plan validation failed: {exc}. Attempting plan repair...")
             self.plan_repair_attempted = True
 
@@ -72,9 +77,10 @@ class DataInsightAgent:
                     invalid_plan=plan,
                     validation_feedback=sanitized_feedback
                 )
-            except Exception:
-                exc.invalid_plan = plan
-                raise exc
+            except Exception as rep_err:
+                rep_err.invalid_plan = plan
+                rep_err.failure_stage = "plan_validation"
+                raise rep_err
 
             # Re-validate the repaired plan
             logger.info("Validating repaired analysis plan...")
@@ -83,6 +89,7 @@ class DataInsightAgent:
                 plan = repaired_plan
             except PlanValidationError as repair_exc:
                 repair_exc.invalid_plan = repaired_plan
+                repair_exc.failure_stage = "plan_validation"
                 raise repair_exc
 
             logger.info("Plan repair succeeded.")
@@ -91,10 +98,16 @@ class DataInsightAgent:
         # 6. Execute approved steps using deterministic AnalysisExecutor
         results = []
         logger.info(f"Executing {len(plan.steps)} approved analysis steps...")
-        for idx, step in enumerate(plan.steps):
-            res_id = f"result_{idx + 1}"
-            res = self.executor.execute(df, step, result_id=res_id)
-            results.append(res)
+        try:
+            for idx, step in enumerate(plan.steps):
+                res_id = f"result_{idx + 1}"
+                res = self.executor.execute(df, step, result_id=res_id)
+                results.append(res)
+        except Exception as exc:
+            exc.analysis_plan = plan
+            exc.analysis_results = results
+            exc.failure_stage = "execution"
+            raise exc
 
         # 7. Request structured report/interpretations from provider
         logger.info("Requesting structured analysis report interpretation...")
@@ -103,6 +116,7 @@ class DataInsightAgent:
         except ProviderError as pe:
             pe.analysis_plan = plan
             pe.analysis_results = results
+            pe.failure_stage = "report_generation"
             raise pe
         except Exception as e:
             try:
@@ -110,6 +124,7 @@ class DataInsightAgent:
                 e.analysis_results = results
             except Exception:
                 pass
+            e.failure_stage = "report_generation"
             raise e
 
         # 8. Validate report grounding references
@@ -119,6 +134,8 @@ class DataInsightAgent:
         except GroundingValidationError as gve:
             gve.analysis_plan = plan
             gve.analysis_results = results
+            gve.report = report
+            gve.failure_stage = "grounding_validation"
             raise gve
 
         logger.info("Analysis completed successfully.")

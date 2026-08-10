@@ -70,4 +70,7 @@ class EvaluationResult(BaseModel):
     error_category: Optional[str] = None  # e.g., "provider_unavailable", "timeout", "unsafe_plan", etc.
     final_success: bool
     selected_plan: Optional[AnalysisPlan] = None
-    execution_diagnostics: Optional[List[ExecutionCheckDiagnostic]] = None
+    execution_diagnostics: List[ExecutionCheckDiagnostic] = Field(default_factory=list)
+    failure_stage: Optional[str] = None
+    exception_type: Optional[str] = None
+    safe_error_detail: Optional[str] = None

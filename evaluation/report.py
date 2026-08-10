@@ -51,6 +51,10 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     plan_repair_rate = max(0.0, min(1.0, plan_repair_attempted_cnt / total if total else 0.0))
     repair_success_rate = max(0.0, min(1.0, plan_repair_succeeded_cnt / plan_repair_attempted_cnt if plan_repair_attempted_cnt > 0 else 0.0))
 
+    # Grounding Validation Pass Rate = grounded successful validations / attempted cases
+    grounding_passed_cnt = sum(1 for r in results if r.grounding_scores.structurally_grounded)
+    grounding_validation_pass_rate = max(0.0, min(1.0, grounding_passed_cnt / total if total else 0.0))
+
     execution_rate = max(0.0, min(1.0, execution_passed_cnt / total if total else 0.0))
     grounding_rate = max(0.0, min(1.0, grounding_passed_cnt / completed if completed else 0.0))
     end_to_end_rate = max(0.0, min(1.0, success_cnt / total if total else 0.0))
@@ -92,7 +96,8 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     md.append(f"| **Required-Operation Recall (Semantic)** | `selected_required_or_equiv_ops / expected_ops` | {avg_semantic_recall:.1%} | >= 85% | {'PASS' if avg_semantic_recall >= 0.85 else 'FAIL'} |")
     md.append(f"| **Average Irrelevant-Operation Rate** | `irrelevant_steps / total_steps` | {avg_irrelevant:.1%} | - | - |")
     md.append(f"| **Execution Correctness Rate** | `pandas_execution_correct / attempted` | {execution_rate:.1%} | 100% | {'PASS' if execution_rate >= 1.0 else 'FAIL'} |")
-    md.append(f"| **Structural Grounding Rate** | `grounded_runs / completed` | {grounding_rate:.1%} | 100% | {'PASS' if grounding_rate >= 1.0 else 'FAIL'} |")
+    md.append(f"| **Structural Grounding Rate (Completed)** | `grounded_runs / completed_runs` | {grounding_rate:.1%} | - | - |")
+    md.append(f"| **Grounding Validation Pass Rate (Attempted)** | `grounded_runs / attempted_cases` | {grounding_validation_pass_rate:.1%} | 100% | {'PASS' if grounding_validation_pass_rate >= 1.0 else 'FAIL'} |")
     md.append(f"| **Causal-Claim Flag Count** | Keyword count in descriptive cases | {total_causal_flags} | 0 | {'PASS' if total_causal_flags == 0 else 'FAIL'} |")
     md.append(f"| **Unsupported-Numeric-Claim Flag Count** | Metric mismatch flags in report | {total_numeric_flags} | 0 | {'PASS' if total_numeric_flags == 0 else 'FAIL'} |")
     md.append(f"| **End-to-End Success Rate** | `success_runs / attempted` | {end_to_end_rate:.1%} | >= 80% | {'PASS' if end_to_end_rate >= 0.80 else 'FAIL'} |")
@@ -162,8 +167,11 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
         md.append("## Failed Case Diagnostics")
         for r in failed_results:
             md.append(f"### Case: {r.case_id}")
-            md.append(f"Model: {r.model}")
-            md.append(f"Required-operation recall: {r.planner_scores.required_operation_recall:.0%}")
+            md.append(f"- Model: `{r.model}`")
+            md.append(f"- Failure Stage: `{r.failure_stage or 'None'}`")
+            md.append(f"- Exception Type: `{r.exception_type or 'None'}`")
+            md.append(f"- Error Detail: {r.safe_error_detail or 'None'}")
+            md.append(f"- Required-operation recall: {r.planner_scores.required_operation_recall:.0%}")
             md.append("")
 
             md.append("Selected plan:")
