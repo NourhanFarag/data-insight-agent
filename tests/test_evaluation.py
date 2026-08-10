@@ -368,3 +368,74 @@ def test_evaluation_rate_bounds_and_exact_math():
     # Check that rates do not exceed 100%
     assert "100.5%" not in md_report
     assert "100.0%" in md_report
+
+
+def test_save_evaluation_artifacts_mock(tmp_path):
+    """Regression test: saving evaluation artifacts for mock provider."""
+    from evaluation.report import save_evaluation_artifacts
+    results = [
+        EvaluationResult(
+            case_id="case_1", provider="mock", model="mock",
+            planner_scores=PlannerScores(schema_valid=True, plan_valid=True, required_operation_recall=1.0, irrelevant_operation_rate=0.0, invalid_column_attempts=0, planner_success=True),
+            execution_passed=True,
+            grounding_scores=GroundingScores(structurally_grounded=True, unsupported_numeric_claim_flags=0, causal_claim_flags=0),
+            latency_ms=150.0, final_success=True
+        )
+    ]
+
+    json_path, md_path = save_evaluation_artifacts(results, "mock", 1, output_dir=str(tmp_path))
+
+    # Verify files created
+    assert os.path.exists(json_path)
+    assert os.path.exists(md_path)
+
+    # Read files to check contents
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        assert data["provider"] == "mock"
+        assert "model" not in data or data["model"] == "mock"
+        # Verify no keys or secrets are written
+        assert "API_KEY" not in str(data)
+
+    with open(md_path, "r", encoding="utf-8") as f:
+        md = f.read()
+        assert "mock" in md.lower()
+        # Verify no keys or secrets are written
+        assert "API_KEY" not in md
+
+
+def test_save_evaluation_artifacts_ollama(tmp_path):
+    """Regression test: saving evaluation artifacts for ollama provider."""
+    from evaluation.report import save_evaluation_artifacts
+    results = [
+        EvaluationResult(
+            case_id="case_1", provider="ollama", model="ollama",
+            planner_scores=PlannerScores(schema_valid=True, plan_valid=True, required_operation_recall=1.0, irrelevant_operation_rate=0.0, invalid_column_attempts=0, planner_success=True),
+            execution_passed=True,
+            grounding_scores=GroundingScores(structurally_grounded=True, unsupported_numeric_claim_flags=0, causal_claim_flags=0),
+            latency_ms=150.0, final_success=True
+        )
+    ]
+
+    # Patch OLLAMA_MODEL to ensure it is deterministic
+    with patch("app.config.settings.OLLAMA_MODEL", "qwen3:8b-test"):
+        json_path, md_path = save_evaluation_artifacts(results, "ollama", 1, output_dir=str(tmp_path))
+
+        # Verify files created
+        assert os.path.exists(json_path)
+        assert os.path.exists(md_path)
+
+        # Read files to check contents
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            assert data["provider"] == "ollama"
+            assert data["model"] == "qwen3:8b-test"
+            assert data["base_url"] == "local"
+            # Verify no secrets are written
+            assert "API_KEY" not in str(data)
+
+        with open(md_path, "r", encoding="utf-8") as f:
+            md = f.read()
+            assert "qwen3:8b-test" in md
+            assert "local" in md
+            assert "API_KEY" not in md

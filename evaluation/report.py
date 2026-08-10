@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from typing import List
 from evaluation.models import EvaluationResult
+from app.config import settings
 
 def compile_metrics_markdown(results: List[EvaluationResult], provider: str, repetitions: int) -> str:
     """Aggregates scores and generates a readable Markdown report with target acceptance thresholds."""
