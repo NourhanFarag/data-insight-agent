@@ -11,6 +11,11 @@
   "prohibited_operations": [
     "CORRELATION"
   ],
+  "equivalent_operations": {
+    "TOP_VALUES": [
+      "GROUP_BY_COUNT"
+    ]
+  },
   "expected_result_checks": [
     {
       "operation": "TOP_VALUES",

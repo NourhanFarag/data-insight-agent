@@ -1,7 +1,7 @@
 import re
 import math
 from typing import List, Dict, Any, Set
-from app.models.analysis import AnalysisPlan, AnalysisResult, ProviderReport
+from app.models.analysis import AnalysisPlan, AnalysisResult, ProviderReport, AnalysisOperation
 from app.models.responses import DatasetSummary
 from app.services.plan_validator import PlanValidator
 from app.services.grounding_validator import GroundingValidator
@@ -57,16 +57,23 @@ def score_plan(proposed_plan: AnalysisPlan, case: EvaluationCase, summary: Datas
     except PlanValidationError:
         plan_valid = False
 
-    # Required operation recall
+    # Required operation recall (exact vs semantic)
+    exact_matched = 0
+    semantic_matched = 0
     if not case.required_operations:
         recall = 1.0
+        semantic_recall = 1.0
     else:
-        matched = 0
         for req_op in case.required_operations:
-            # Check if there is any step matching this operation
             if any(step.operation == req_op for step in proposed_plan.steps):
-                matched += 1
-        recall = matched / len(case.required_operations)
+                exact_matched += 1
+                semantic_matched += 1
+            else:
+                equivs = case.equivalent_operations.get(req_op, []) if case.equivalent_operations else []
+                if any(step.operation in equivs for step in proposed_plan.steps):
+                    semantic_matched += 1
+        recall = exact_matched / len(case.required_operations)
+        semantic_recall = semantic_matched / len(case.required_operations)
 
     # Irrelevant operation rate
     if not proposed_plan.steps:
@@ -76,7 +83,13 @@ def score_plan(proposed_plan: AnalysisPlan, case: EvaluationCase, summary: Datas
         for step in proposed_plan.steps:
             is_req = step.operation in case.required_operations
             is_acc = step.operation in case.acceptable_operations
-            if not is_req and not is_acc:
+            is_equiv = False
+            if case.equivalent_operations:
+                for req_op, equivs in case.equivalent_operations.items():
+                    if req_op in case.required_operations and step.operation in equivs:
+                        is_equiv = True
+                        break
+            if not is_req and not is_acc and not is_equiv:
                 irrelevant_steps += 1
         irrelevant_rate = irrelevant_steps / len(proposed_plan.steps)
 
@@ -88,8 +101,8 @@ def score_plan(proposed_plan: AnalysisPlan, case: EvaluationCase, summary: Datas
         if step.second_column and step.second_column not in summary.column_names:
             invalid_cols += 1
 
-    # Success definition: valid schema/plan and recall above threshold (85%)
-    planner_success = schema_valid and plan_valid and (recall >= 0.85)
+    # Success definition: valid schema/plan and semantic recall above threshold (85%)
+    planner_success = schema_valid and plan_valid and (semantic_recall >= 0.85)
 
     return PlannerScores(
         schema_valid=schema_valid,
@@ -97,24 +110,88 @@ def score_plan(proposed_plan: AnalysisPlan, case: EvaluationCase, summary: Datas
         required_operation_recall=recall,
         irrelevant_operation_rate=irrelevant_rate,
         invalid_column_attempts=invalid_cols,
-        planner_success=planner_success
+        planner_success=planner_success,
+        semantic_operation_recall=semantic_recall
     )
+
+def _find_matching_result(results: List[AnalysisResult], check: ExpectedResultCheck, case: EvaluationCase) -> tuple[AnalysisResult | None, str | None]:
+    """Helper to find matching result (exact or equivalent) and return (matching_res, mismatch_reason)."""
+    # Check if operation exists at all
+    has_op = False
+    for res in results:
+        if res.operation == check.operation:
+            has_op = True
+            break
+        if case.equivalent_operations and res.operation in case.equivalent_operations.get(check.operation, []):
+            has_op = True
+            break
+            
+    if not has_op:
+        return None, "missing_expected_operation"
+
+    # Try exact match first
+    for res in results:
+        if res.operation == check.operation:
+            # Check column
+            if check.column and check.column not in res.target_columns:
+                continue
+            # Check group_by
+            if check.group_by and res.grouping_column != check.group_by:
+                continue
+            # Check second_column
+            if check.second_column and check.second_column not in res.target_columns:
+                continue
+            return res, None
+
+    # Try equivalent match
+    if case.equivalent_operations:
+        equiv_ops = case.equivalent_operations.get(check.operation, [])
+        for res in results:
+            if res.operation in equiv_ops:
+                # Target column / grouping semantics correspond
+                if check.operation == AnalysisOperation.TOP_VALUES and res.operation == AnalysisOperation.GROUP_BY_COUNT:
+                    if check.column and res.grouping_column != check.column:
+                        continue
+                    return res, None
+
+    # If we had the operation but target semantics didn't match: Check mismatch reason in precedence order
+    op_matches = [res for res in results if res.operation == check.operation or (case.equivalent_operations and res.operation in case.equivalent_operations.get(check.operation, []))]
+    
+    # Column check
+    if check.column:
+        has_col = False
+        for r in op_matches:
+            if r.operation == check.operation and check.column in r.target_columns:
+                has_col = True
+            elif check.operation == AnalysisOperation.TOP_VALUES and r.operation == AnalysisOperation.GROUP_BY_COUNT and r.grouping_column == check.column:
+                has_col = True
+        if not has_col:
+            return None, "column_mismatch"
+
+    # Group_by check
+    if check.group_by:
+        has_gb = False
+        for r in op_matches:
+            if r.operation == check.operation and r.grouping_column == check.group_by:
+                has_gb = True
+        if not has_gb:
+            return None, "group_by_mismatch"
+
+    # Second column check
+    if check.second_column:
+        has_sc = False
+        for r in op_matches:
+            if r.operation == check.operation and check.second_column in r.target_columns:
+                has_sc = True
+        if not has_sc:
+            return None, "second_column_mismatch"
+
+    return None, "missing_expected_operation"
 
 def verify_execution(results: List[AnalysisResult], case: EvaluationCase) -> bool:
     """Checks computed results against ground truth expected checks."""
     for check in case.expected_result_checks:
-        # Find matching result
-        matching_res = None
-        for res in results:
-            if res.operation == check.operation:
-                # If column is specified, match it
-                if check.column and check.column not in res.target_columns:
-                    continue
-                if check.group_by and res.grouping_column != check.group_by:
-                    continue
-                matching_res = res
-                break
-
+        matching_res, _ = _find_matching_result(results, check, case)
         if not matching_res:
             return False
 
@@ -234,24 +311,37 @@ def _sanitize_string(s: str) -> str:
     return s
 
 
-def _sanitize_value(val: Any) -> Any:
+def _sanitize_value(val: Any, tags: List[str] | None = None, registry: dict | None = None) -> Any:
     """Helper to safely serialize diagnostic values (expected/actual), redacting CSV cell payloads."""
+    if registry is None:
+        registry = {}
+    is_adversarial = tags is not None and "adversarial" in tags
+
     if val is None:
         return None
     if isinstance(val, (int, float, bool)):
         return val
     if isinstance(val, str):
+        if is_adversarial:
+            if val not in registry:
+                registry[val] = f"<redacted category {len(registry) + 1}>"
+            return registry[val]
         return _sanitize_string(val)
     if isinstance(val, dict):
-        return {_sanitize_string(str(k)): _sanitize_value(v) for k, v in val.items()}
+        sanitized_dict = {}
+        for k, v in val.items():
+            sanitized_key = _sanitize_value(k, tags, registry)
+            sanitized_val = _sanitize_value(v, tags, registry)
+            sanitized_dict[sanitized_key] = sanitized_val
+        return sanitized_dict
     if isinstance(val, list):
-        return [_sanitize_value(v) for v in val]
+        return [_sanitize_value(v, tags, registry) for v in val]
     return "<redacted categorical value>"
 
 
-def _sanitize_actual_value(actual: Any, expected: Any, matched: bool) -> Any:
+def _sanitize_actual_value(actual: Any, expected: Any, matched: bool, tags: List[str] | None = None, registry: dict | None = None) -> Any:
     """Helper to safely serialize computed actual values, keeping CSV cell payloads redacted."""
-    return _sanitize_value(actual)
+    return _sanitize_value(actual, tags, registry)
 
 
 def diagnose_execution(
@@ -260,6 +350,7 @@ def diagnose_execution(
 ) -> List[ExecutionCheckDiagnostic]:
     """Inspects expected result checks and explains why each comparison passed or failed."""
     diagnostics = []
+    registry = {}
 
     for check in case.expected_result_checks:
         if results is None:
@@ -269,7 +360,7 @@ def diagnose_execution(
                     expected_column=check.column,
                     expected_group_by=check.group_by,
                     expected_second_column=check.second_column,
-                    expected_value=_sanitize_value(check.expected_value),
+                    expected_value=_sanitize_value(check.expected_value, case.tags, registry),
                     matching_result_found=False,
                     comparison_outcome=False,
                     mismatch_reason="execution_not_reached",
@@ -278,52 +369,7 @@ def diagnose_execution(
             )
             continue
 
-        # Check in order of mismatch precedence
-        mismatch_reason = None
-        matching_res = None
-
-        has_op = any(res.operation == check.operation for res in results)
-        if not has_op:
-            mismatch_reason = "missing_expected_operation"
-        else:
-            op_matches = [res for res in results if res.operation == check.operation]
-
-            # Check column mismatch
-            if check.column:
-                has_col = any(check.column in r.target_columns for r in op_matches)
-                if not has_col:
-                    mismatch_reason = "column_mismatch"
-
-            # Check group_by mismatch
-            if not mismatch_reason and check.group_by:
-                col_matches = [r for r in op_matches if not check.column or check.column in r.target_columns]
-                has_gb = any(r.grouping_column == check.group_by for r in col_matches)
-                if not has_gb:
-                    mismatch_reason = "group_by_mismatch"
-
-            # Check second_column mismatch
-            if not mismatch_reason and check.second_column:
-                gb_matches = [
-                    r for r in op_matches
-                    if (not check.column or check.column in r.target_columns)
-                    and (not check.group_by or r.grouping_column == check.group_by)
-                ]
-                has_sc = any(check.second_column in r.target_columns for r in gb_matches)
-                if not has_sc:
-                    mismatch_reason = "second_column_mismatch"
-
-        # Find matching result if mismatch reason not determined yet
-        if not mismatch_reason:
-            for res in results:
-                if res.operation == check.operation:
-                    if check.column and check.column not in res.target_columns:
-                        continue
-                    if check.group_by and res.grouping_column != check.group_by:
-                        continue
-                    if check.second_column and check.second_column not in res.target_columns:
-                        continue
-                    matching_res = res
-                    break
+        matching_res, mismatch_reason = _find_matching_result(results, check, case)
 
         if not matching_res:
             diagnostics.append(
@@ -332,7 +378,7 @@ def diagnose_execution(
                     expected_column=check.column,
                     expected_group_by=check.group_by,
                     expected_second_column=check.second_column,
-                    expected_value=_sanitize_value(check.expected_value),
+                    expected_value=_sanitize_value(check.expected_value, case.tags, registry),
                     matching_result_found=False,
                     comparison_outcome=False,
                     mismatch_reason=mismatch_reason or "missing_expected_operation",
@@ -364,14 +410,14 @@ def diagnose_execution(
             else:
                 mismatch_reason = "value_mismatch"
 
-        sanitized_actual = _sanitize_actual_value(actual, expected, comparison_outcome)
+        sanitized_actual = _sanitize_actual_value(actual, expected, comparison_outcome, case.tags, registry)
         diagnostics.append(
             ExecutionCheckDiagnostic(
                 expected_operation=check.operation,
                 expected_column=check.column,
                 expected_group_by=check.group_by,
                 expected_second_column=check.second_column,
-                expected_value=_sanitize_value(check.expected_value),
+                expected_value=_sanitize_value(check.expected_value, case.tags, registry),
                 matching_result_found=True,
                 comparison_outcome=comparison_outcome,
                 mismatch_reason=mismatch_reason,

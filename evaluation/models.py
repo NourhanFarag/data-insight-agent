@@ -18,6 +18,7 @@ class EvaluationCase(BaseModel):
     acceptable_operations: List[AnalysisOperation] = Field(default_factory=list)
     prohibited_operations: List[AnalysisOperation] = Field(default_factory=list)
     expected_result_checks: List[ExpectedResultCheck]
+    equivalent_operations: Dict[AnalysisOperation, List[AnalysisOperation]] = Field(default_factory=dict)
     required_finding_concepts: List[str] = Field(default_factory=list)
     prohibited_claims: List[str] = Field(default_factory=list)
     acceptable_recommendation_themes: List[str] = Field(default_factory=list)
@@ -32,6 +33,7 @@ class PlannerScores(BaseModel):
     planner_success: bool
     plan_repair_attempted: bool = False
     plan_repair_succeeded: bool = False
+    semantic_operation_recall: float = 0.0
 
 class GroundingScores(BaseModel):
     structurally_grounded: bool
