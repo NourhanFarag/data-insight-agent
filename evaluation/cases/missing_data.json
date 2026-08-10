@@ -1,10 +1,16 @@
 {
   "case_id": "missing_data",
   "dataset_path": "evaluation/datasets/missing_data.csv",
-  "question": "Which fields have missing information that may affect analysis?",
-  "required_operations": ["MISSING_VALUES"],
-  "acceptable_operations": ["COUNT"],
-  "prohibited_operations": ["CORRELATION"],
+  "question": "How many missing values are in each field, including fields with zero missing values?",
+  "required_operations": [
+    "MISSING_VALUES"
+  ],
+  "acceptable_operations": [
+    "COUNT"
+  ],
+  "prohibited_operations": [
+    "CORRELATION"
+  ],
   "expected_result_checks": [
     {
       "operation": "MISSING_VALUES",
@@ -22,8 +28,18 @@
       "expected_value": 0
     }
   ],
-  "required_finding_concepts": ["missing", "1"],
+  "required_finding_concepts": [
+    "missing",
+    "1"
+  ],
   "prohibited_claims": [],
-  "acceptable_recommendation_themes": ["data quality", "clean", "impute"],
-  "tags": ["metadata", "missing"]
+  "acceptable_recommendation_themes": [
+    "data quality",
+    "clean",
+    "impute"
+  ],
+  "tags": [
+    "metadata",
+    "missing"
+  ]
 }

@@ -1,10 +1,16 @@
 {
   "case_id": "category_frequency",
   "dataset_path": "evaluation/datasets/churn_segments.csv",
-  "question": "Which customer segment appears most frequently?",
-  "required_operations": ["TOP_VALUES"],
-  "acceptable_operations": ["GROUP_BY_COUNT"],
-  "prohibited_operations": ["CORRELATION"],
+  "question": "What is the frequency count for every customer segment?",
+  "required_operations": [
+    "TOP_VALUES"
+  ],
+  "acceptable_operations": [
+    "GROUP_BY_COUNT"
+  ],
+  "prohibited_operations": [
+    "CORRELATION"
+  ],
   "expected_result_checks": [
     {
       "operation": "TOP_VALUES",
@@ -15,8 +21,17 @@
       }
     }
   ],
-  "required_finding_concepts": ["SMB", "3"],
+  "required_finding_concepts": [
+    "SMB",
+    "3"
+  ],
   "prohibited_claims": [],
-  "acceptable_recommendation_themes": ["targeting", "segmentation"],
-  "tags": ["categorical", "frequency"]
+  "acceptable_recommendation_themes": [
+    "targeting",
+    "segmentation"
+  ],
+  "tags": [
+    "categorical",
+    "frequency"
+  ]
 }

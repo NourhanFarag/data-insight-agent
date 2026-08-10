@@ -221,25 +221,37 @@ def score_report(report: ProviderReport, results: List[AnalysisResult], case: Ev
     )
 
 
+def _sanitize_string(s: str) -> str:
+    if not isinstance(s, str):
+        return str(s)
+    s_lower = s.lower()
+    # Check for prompt injection or raw CSV cell leak
+    if ";" in s or "--" in s or "drop" in s_lower or "select" in s_lower or "union" in s_lower or "delete" in s_lower:
+        return "<redacted adversarial value>"
+    # Also check for suspicious quotes or length
+    if len(s) > 50 or any(c in s for c in ["'", '"', ";", "--", "/*", "*/"]):
+        return "<redacted categorical value>"
+    return s
+
+
+def _sanitize_value(val: Any) -> Any:
+    """Helper to safely serialize diagnostic values (expected/actual), redacting CSV cell payloads."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float, bool)):
+        return val
+    if isinstance(val, str):
+        return _sanitize_string(val)
+    if isinstance(val, dict):
+        return {_sanitize_string(str(k)): _sanitize_value(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_sanitize_value(v) for v in val]
+    return "<redacted categorical value>"
+
+
 def _sanitize_actual_value(actual: Any, expected: Any, matched: bool) -> Any:
     """Helper to safely serialize computed actual values, keeping CSV cell payloads redacted."""
-    if actual is None:
-        return None
-    if isinstance(actual, (int, float, bool)):
-        return actual
-    if isinstance(actual, str):
-        if matched:
-            return actual
-        return "<redacted categorical value>"
-    if isinstance(actual, dict):
-        if matched:
-            return actual
-        return "<redacted categorical value>"
-    if isinstance(actual, list):
-        if matched:
-            return actual
-        return "<redacted categorical value>"
-    return "<redacted categorical value>"
+    return _sanitize_value(actual)
 
 
 def diagnose_execution(
@@ -257,7 +269,7 @@ def diagnose_execution(
                     expected_column=check.column,
                     expected_group_by=check.group_by,
                     expected_second_column=check.second_column,
-                    expected_value=check.expected_value,
+                    expected_value=_sanitize_value(check.expected_value),
                     matching_result_found=False,
                     comparison_outcome=False,
                     mismatch_reason="execution_not_reached",
@@ -320,7 +332,7 @@ def diagnose_execution(
                     expected_column=check.column,
                     expected_group_by=check.group_by,
                     expected_second_column=check.second_column,
-                    expected_value=check.expected_value,
+                    expected_value=_sanitize_value(check.expected_value),
                     matching_result_found=False,
                     comparison_outcome=False,
                     mismatch_reason=mismatch_reason or "missing_expected_operation",
@@ -359,7 +371,7 @@ def diagnose_execution(
                 expected_column=check.column,
                 expected_group_by=check.group_by,
                 expected_second_column=check.second_column,
-                expected_value=check.expected_value,
+                expected_value=_sanitize_value(check.expected_value),
                 matching_result_found=True,
                 comparison_outcome=comparison_outcome,
                 mismatch_reason=mismatch_reason,
