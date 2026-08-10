@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from app.models.analysis import AnalysisOperation
+from app.models.analysis import AnalysisOperation, AnalysisPlan
 
 class ExpectedResultCheck(BaseModel):
     operation: AnalysisOperation
@@ -45,6 +45,17 @@ class HumanScores(BaseModel):
     restraint: Optional[int] = None
     clarity: Optional[int] = None
 
+class ExecutionCheckDiagnostic(BaseModel):
+    expected_operation: AnalysisOperation
+    expected_column: Optional[str] = None
+    expected_group_by: Optional[str] = None
+    expected_second_column: Optional[str] = None
+    expected_value: Any = None
+    matching_result_found: bool
+    comparison_outcome: bool
+    mismatch_reason: Optional[str] = None
+    actual_value: Any = None
+
 class EvaluationResult(BaseModel):
     case_id: str
     provider: str
@@ -56,3 +67,5 @@ class EvaluationResult(BaseModel):
     latency_ms: Optional[float] = None
     error_category: Optional[str] = None  # e.g., "provider_unavailable", "timeout", "unsafe_plan", etc.
     final_success: bool
+    selected_plan: Optional[AnalysisPlan] = None
+    execution_diagnostics: Optional[List[ExecutionCheckDiagnostic]] = None

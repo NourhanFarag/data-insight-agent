@@ -219,3 +219,153 @@ def score_report(report: ProviderReport, results: List[AnalysisResult], case: Ev
         unsupported_numeric_claim_flags=unsupported_numeric_flags,
         causal_claim_flags=causal_flags
     )
+
+
+def _sanitize_actual_value(actual: Any, expected: Any, matched: bool) -> Any:
+    """Helper to safely serialize computed actual values, keeping CSV cell payloads redacted."""
+    if actual is None:
+        return None
+    if isinstance(actual, (int, float, bool)):
+        return actual
+    if isinstance(actual, str):
+        if matched:
+            return actual
+        return "<redacted categorical value>"
+    if isinstance(actual, dict):
+        if matched:
+            return actual
+        return "<redacted categorical value>"
+    if isinstance(actual, list):
+        if matched:
+            return actual
+        return "<redacted categorical value>"
+    return "<redacted categorical value>"
+
+
+def diagnose_execution(
+    results: List[AnalysisResult] | None,
+    case: EvaluationCase,
+) -> List[ExecutionCheckDiagnostic]:
+    """Inspects expected result checks and explains why each comparison passed or failed."""
+    from evaluation.models import ExecutionCheckDiagnostic
+    diagnostics = []
+
+    for check in case.expected_result_checks:
+        if results is None:
+            diagnostics.append(
+                ExecutionCheckDiagnostic(
+                    expected_operation=check.operation,
+                    expected_column=check.column,
+                    expected_group_by=check.group_by,
+                    expected_second_column=check.second_column,
+                    expected_value=check.expected_value,
+                    matching_result_found=False,
+                    comparison_outcome=False,
+                    mismatch_reason="execution_not_reached",
+                    actual_value=None
+                )
+            )
+            continue
+
+        # Check in order of mismatch precedence
+        mismatch_reason = None
+        matching_res = None
+
+        has_op = any(res.operation == check.operation for res in results)
+        if not has_op:
+            mismatch_reason = "missing_expected_operation"
+        else:
+            op_matches = [res for res in results if res.operation == check.operation]
+
+            # Check column mismatch
+            if check.column:
+                has_col = any(check.column in r.target_columns for r in op_matches)
+                if not has_col:
+                    mismatch_reason = "column_mismatch"
+
+            # Check group_by mismatch
+            if not mismatch_reason and check.group_by:
+                col_matches = [r for r in op_matches if not check.column or check.column in r.target_columns]
+                has_gb = any(r.grouping_column == check.group_by for r in col_matches)
+                if not has_gb:
+                    mismatch_reason = "group_by_mismatch"
+
+            # Check second_column mismatch
+            if not mismatch_reason and check.second_column:
+                gb_matches = [
+                    r for r in op_matches
+                    if (not check.column or check.column in r.target_columns)
+                    and (not check.group_by or r.grouping_column == check.group_by)
+                ]
+                has_sc = any(check.second_column in r.target_columns for r in gb_matches)
+                if not has_sc:
+                    mismatch_reason = "second_column_mismatch"
+
+        # Find matching result if mismatch reason not determined yet
+        if not mismatch_reason:
+            for res in results:
+                if res.operation == check.operation:
+                    if check.column and check.column not in res.target_columns:
+                        continue
+                    if check.group_by and res.grouping_column != check.group_by:
+                        continue
+                    if check.second_column and check.second_column not in res.target_columns:
+                        continue
+                    matching_res = res
+                    break
+
+        if not matching_res:
+            diagnostics.append(
+                ExecutionCheckDiagnostic(
+                    expected_operation=check.operation,
+                    expected_column=check.column,
+                    expected_group_by=check.group_by,
+                    expected_second_column=check.second_column,
+                    expected_value=check.expected_value,
+                    matching_result_found=False,
+                    comparison_outcome=False,
+                    mismatch_reason=mismatch_reason or "missing_expected_operation",
+                    actual_value=None
+                )
+            )
+            continue
+
+        # Perform comparison
+        actual = matching_res.computed_result
+        expected = check.expected_value
+        tol = check.tolerance
+        comparison_outcome = _compare_values(actual, expected, tol)
+
+        if not comparison_outcome:
+            if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
+                if tol is not None:
+                    if abs(actual - expected) > tol:
+                        mismatch_reason = "numeric_tolerance_mismatch"
+                    else:
+                        mismatch_reason = "value_mismatch"
+                else:
+                    mismatch_reason = "value_mismatch"
+            elif isinstance(actual, (dict, list)) and isinstance(expected, (dict, list)):
+                if len(actual) != len(expected):
+                    mismatch_reason = "result_shape_mismatch"
+                else:
+                    mismatch_reason = "value_mismatch"
+            else:
+                mismatch_reason = "value_mismatch"
+
+        sanitized_actual = _sanitize_actual_value(actual, expected, comparison_outcome)
+        diagnostics.append(
+            ExecutionCheckDiagnostic(
+                expected_operation=check.operation,
+                expected_column=check.column,
+                expected_group_by=check.group_by,
+                expected_second_column=check.second_column,
+                expected_value=check.expected_value,
+                matching_result_found=True,
+                comparison_outcome=comparison_outcome,
+                mismatch_reason=mismatch_reason,
+                actual_value=sanitized_actual
+            )
+        )
+
+    return diagnostics

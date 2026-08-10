@@ -4,11 +4,21 @@ import time
 import pandas as pd
 from typing import List
 from evaluation.models import EvaluationCase, EvaluationResult, PlannerScores, GroundingScores
-from evaluation.scorers import score_plan, verify_execution, score_report
+from evaluation.scorers import score_plan, verify_execution, score_report, diagnose_execution
 from app.services.agent_service import DataInsightAgent
 from app.models.analysis import ProviderReport
 from app.core.exceptions import PlanValidationError, GroundingValidationError, ProviderError
 from app.config import settings
+
+def resolve_model_name(provider: str) -> str:
+    """Centralized helper to resolve the model name for a provider."""
+    if provider == "gemini":
+        return settings.GEMINI_MODEL
+    elif provider == "openai":
+        return settings.OPENAI_MODEL
+    elif provider == "ollama":
+        return settings.OLLAMA_MODEL
+    return "mock"
 
 def load_cases(cases_dir: str) -> List[EvaluationCase]:
     """Loads and validates all frozen evaluation cases from the cases directory."""
@@ -79,14 +89,28 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
             and grounding_scores.unsupported_numeric_claim_flags == 0
         )
 
-    except PlanValidationError:
+        selected_plan = response.analysis_plan
+        execution_diagnostics = diagnose_execution(response.analysis_results, case)
+
+    except PlanValidationError as exc:
         error_cat = "plan_validation_failed"
-    except GroundingValidationError:
+        selected_plan = getattr(exc, "invalid_plan", None)
+        execution_diagnostics = diagnose_execution(None, case)
+    except GroundingValidationError as exc:
         error_cat = "grounding_validation_failed"
-    except ProviderError:
+        selected_plan = getattr(exc, "analysis_plan", None)
+        results_list = getattr(exc, "analysis_results", None)
+        execution_diagnostics = diagnose_execution(results_list, case)
+    except ProviderError as exc:
         error_cat = "provider_error"
-    except Exception:
+        selected_plan = getattr(exc, "analysis_plan", None)
+        results_list = getattr(exc, "analysis_results", None)
+        execution_diagnostics = diagnose_execution(results_list, case)
+    except Exception as exc:
         error_cat = "unknown_error"
+        selected_plan = getattr(exc, "analysis_plan", None)
+        results_list = getattr(exc, "analysis_results", None)
+        execution_diagnostics = diagnose_execution(results_list, case)
 
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -113,11 +137,13 @@ async def evaluate_case(case: EvaluationCase, provider: str) -> EvaluationResult
     return EvaluationResult(
         case_id=case.case_id,
         provider=provider,
-        model=settings.GEMINI_MODEL if provider == "gemini" else (settings.OPENAI_MODEL if provider == "openai" else "mock"),
+        model=resolve_model_name(provider),
         planner_scores=planner_scores,
         execution_passed=execution_passed,
         grounding_scores=grounding_scores,
         latency_ms=latency_ms,
         error_category=error_cat,
-        final_success=final_success
+        final_success=final_success,
+        selected_plan=selected_plan,
+        execution_diagnostics=execution_diagnostics
     )

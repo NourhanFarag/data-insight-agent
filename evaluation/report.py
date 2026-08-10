@@ -63,8 +63,9 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
     md.append(f"# Data Insight Agent Evaluation Report ({provider.upper()})")
     md.append(f"Generated at: {now_str}")
     md.append(f"Provider: {provider}")
+    from evaluation.runner import resolve_model_name
+    md.append(f"Model: {resolve_model_name(provider)}")
     if provider == "ollama":
-        md.append(f"Model: {settings.OLLAMA_MODEL}")
         md.append("Base URL: local")
     md.append(f"Repetitions per case: {repetitions}")
     md.append("")
@@ -152,6 +153,44 @@ def compile_metrics_markdown(results: List[EvaluationResult], provider: str, rep
                 f"{'Yes' if r.planner_scores.plan_repair_succeeded else 'No'} |"
             )
 
+    failed_results = [r for r in results if not r.final_success]
+    if failed_results:
+        md.append("")
+        md.append("## Failed Case Diagnostics")
+        for r in failed_results:
+            md.append(f"### Case: {r.case_id}")
+            md.append(f"Model: {r.model}")
+            md.append(f"Required-operation recall: {r.planner_scores.required_operation_recall:.0%}")
+            md.append("")
+
+            md.append("Selected plan:")
+            if r.selected_plan and r.selected_plan.steps:
+                for step in r.selected_plan.steps:
+                    col_str = f" on {step.column}" if step.column else ""
+                    md.append(f"- `{step.step_id}`: {step.operation.value}{col_str}")
+            else:
+                md.append("None (failed before generation)")
+            md.append("")
+
+            md.append("Execution checks:")
+            if r.execution_diagnostics:
+                for diag in r.execution_diagnostics:
+                    op_info = diag.expected_operation.value
+                    col_info = f" on {diag.expected_column}" if diag.expected_column else ""
+                    expected_str = f"{op_info}({diag.expected_column or ''})"
+                    if diag.expected_group_by:
+                        expected_str = f"{op_info}({diag.expected_column or ''} grouping by {diag.expected_group_by})"
+                    outcome_str = "PASS" if diag.comparison_outcome else "FAIL"
+
+                    md.append(f"- Expected: {expected_str}")
+                    md.append(f"  Outcome: {outcome_str}")
+                    if not diag.comparison_outcome:
+                        md.append(f"  Mismatch: {diag.mismatch_reason}")
+                        md.append(f"  Actual: {diag.actual_value}")
+            else:
+                md.append("None (execution not reached)")
+            md.append("")
+
     return "\n".join(md)
 
 
@@ -165,14 +204,15 @@ def save_evaluation_artifacts(results: List[EvaluationResult], provider: str, re
     json_path = os.path.join(output_dir, f"{timestamp}_{provider}_results.json")
     # Convert list of models to dictionaries
     serializable_results = [r.model_dump() for r in results]
+    from evaluation.runner import resolve_model_name
     json_data = {
         "provider": provider,
+        "model": resolve_model_name(provider),
         "repetitions": repetitions,
         "timestamp": timestamp,
         "results": serializable_results
     }
     if provider == "ollama":
-        json_data["model"] = settings.OLLAMA_MODEL
         json_data["base_url"] = "local"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=2)

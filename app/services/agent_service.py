@@ -52,6 +52,7 @@ class DataInsightAgent:
         try:
             self.plan_validator.validate(plan, summary)
         except PlanValidationError as exc:
+            exc.invalid_plan = plan
             logger.warning(f"Initial plan validation failed: {exc}. Attempting plan repair...")
             self.plan_repair_attempted = True
 
@@ -59,16 +60,25 @@ class DataInsightAgent:
             sanitized_feedback = str(exc)
 
             # Request repaired plan
-            plan = await provider.repair_analysis_plan(
-                question=question,
-                dataset_summary=summary,
-                invalid_plan=plan,
-                validation_feedback=sanitized_feedback
-            )
+            try:
+                repaired_plan = await provider.repair_analysis_plan(
+                    question=question,
+                    dataset_summary=summary,
+                    invalid_plan=plan,
+                    validation_feedback=sanitized_feedback
+                )
+            except Exception:
+                exc.invalid_plan = plan
+                raise exc
 
             # Re-validate the repaired plan
             logger.info("Validating repaired analysis plan...")
-            self.plan_validator.validate(plan, summary)
+            try:
+                self.plan_validator.validate(repaired_plan, summary)
+                plan = repaired_plan
+            except PlanValidationError as repair_exc:
+                repair_exc.invalid_plan = repaired_plan
+                raise repair_exc
 
             logger.info("Plan repair succeeded.")
             self.plan_repair_succeeded = True
@@ -83,11 +93,28 @@ class DataInsightAgent:
 
         # 7. Request structured report/interpretations from provider
         logger.info("Requesting structured analysis report interpretation...")
-        report = await provider.generate_report(question, summary, results)
+        try:
+            report = await provider.generate_report(question, summary, results)
+        except ProviderError as pe:
+            pe.analysis_plan = plan
+            pe.analysis_results = results
+            raise pe
+        except Exception as e:
+            try:
+                e.analysis_plan = plan
+                e.analysis_results = results
+            except Exception:
+                pass
+            raise e
 
         # 8. Validate report grounding references
         logger.info("Validating report grounding and citations...")
-        self.grounding_validator.validate(report, results)
+        try:
+            self.grounding_validator.validate(report, results)
+        except GroundingValidationError as gve:
+            gve.analysis_plan = plan
+            gve.analysis_results = results
+            raise gve
 
         logger.info("Analysis completed successfully.")
 
