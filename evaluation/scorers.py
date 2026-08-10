@@ -127,7 +127,7 @@ def verify_execution(results: List[AnalysisResult], case: EvaluationCase) -> boo
 
     return True
 
-def _compare_values(actual: Any, expected: Any, tol: Optional[float]) -> bool:
+def _compare_values(actual: Any, expected: Any, tol: float | None) -> bool:
     """Helper to compare execution outputs with ground truth."""
     if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
         if tol is not None:
